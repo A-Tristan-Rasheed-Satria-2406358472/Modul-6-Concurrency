@@ -77,3 +77,56 @@ stream.write_all(response.as_bytes()).unwrap();
 ### Refleksi pribadi:
 
 Menurutku bagian ini bikin konsep web server jadi lebih kebayang. Untuk nampilin halaman sederhana di browser, server perlu baca request, menyusun response HTTP dengan format yang sesuai, lalu ngirim HTML sebagai body response.
+
+# Commit 3 Reflection Notes
+
+Di commit ini servernya mulai bisa bedain request yang valid dan yang tidak. Sebelumnya, apa pun path yang dibuka di browser, server tetap selalu ngirim `hello.html`. Sekarang server ngecek request line dulu, jadi kalau user buka `/` server akan ngasih halaman utama, sedangkan kalau buka path lain seperti `/bad`, server akan ngasih halaman error `404.html`
+
+Kalo di run `cargo run` terus buka URL `http://127.0.0.1:7878/bad`, browser akan nampilin halaman not found seperti ini
+
+![Commit 3 screen capture](/assets/images/commit3.png)
+
+### Perubahan ada di bagian ini:
+
+```rust
+let request_line = buf_reader.lines().next().unwrap().unwrap();
+
+let (status_line, filename) = if request_line == "GET / HTTP/1.1" {
+    ("HTTP/1.1 200 OK", "hello.html")
+} else {
+    ("HTTP/1.1 404 NOT FOUND", "404.html")
+};
+
+let contents = fs::read_to_string(filename).unwrap();
+let length = contents.len();
+
+let response =
+    format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+
+stream.write_all(response.as_bytes()).unwrap();
+```
+
+### Kalau dijelasin :
+
+1. `request_line` dipakai buat ambil baris pertama dari HTTP request, contohnya `GET / HTTP/1.1`
+2. Kalau `request_line` sama dengan `GET / HTTP/1.1`, berarti user minta halaman utama dan server balikin `hello.html`
+3. Kalau request-nya bukan `/`, server balikin status `404 NOT FOUND` dan isi halaman dari `404.html`
+4. `status_line` dan `filename` dipisah pakai tuple supaya server bisa nentuin status response dan file HTML yang akan dikirim
+5. Setelah file yang benar ditentukan, alur response-nya tetap sama seperti commit sebelumnya, yaitu baca file, hitung `Content-Length`, lalu kirim response ke browser
+
+### Kenapa perlu refactoring:
+
+Refactoring dibutuhkan supaya kode tidak terlalu banyak pengulangan. Kalau response untuk `200 OK` dan `404 NOT FOUND` ditulis terpisah semua, nanti bagian membaca file, menghitung length, membuat response, dan `write_all` bisa jadi dobel. Dengan refactoring, yang dibedakan cukup `status_line` dan `filename`, sedangkan proses membuat dan mengirim response tetap satu alur yang sama.
+
+Menurutku cara ini juga bikin kode lebih gampang dikembangin. Misalnya nanti mau nambah path lain seperti `/about` atau `/contact`, tinggal tambahin kondisi untuk milih file dan status response yang sesuai tanpa harus nulis ulang semua proses kirim response.
+
+### Insight dari bagian ini:
+
+1. HTTP request line bisa dipakai untuk menentukan halaman mana yang diminta oleh browser
+2. Server tidak harus selalu ngirim response yang sama, tapi bisa milih response berdasarkan isi request
+3. Status code seperti `200 OK` dan `404 NOT FOUND` penting karena ngasih tahu browser hasil dari request yang dikirim
+4. Refactoring bikin kode lebih rapi karena bagian yang sama cukup ditulis sekali
+
+### Refleksi pribadi:
+
+Menurutku bagian ini mulai nunjukin bentuk web server yang lebih realistis. Walaupun masih sederhana, servernya udah punya logic untuk validasi request dan ngasih response yang beda tergantung path yang diminta
