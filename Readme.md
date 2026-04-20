@@ -130,3 +130,45 @@ Menurutku cara ini juga bikin kode lebih gampang dikembangin. Misalnya nanti mau
 ### Refleksi pribadi:
 
 Menurutku bagian ini mulai nunjukin bentuk web server yang lebih realistis. Walaupun masih sederhana, servernya udah punya logic untuk validasi request dan ngasih response yang beda tergantung path yang diminta
+
+# Commit 4 Reflection Notes
+
+Di commit ini servernya dicoba untuk simulasi masalah yang muncul kalau server masih berjalan di single thread. Caranya dengan nambah route `/sleep` yang sengaja dibuat delay selama 10 detik sebelum ngasih response. Dari sini kelihatan kalau request lain jadi ikut ketahan selama request `/sleep` belum selesai diproses.
+
+### Perubahan ada di bagian ini:
+
+```rust
+let (status_line, filename) = match &request_line[..] {
+    "GET / HTTP/1.1" => ("HTTP/1.1 200 OK", "hello.html"),
+    "GET /sleep HTTP/1.1" => {
+        thread::sleep(Duration::from_secs(10));
+        ("HTTP/1.1 200 OK", "hello.html")
+    }
+    _ => ("HTTP/1.1 404 NOT FOUND", "404.html"),
+};
+```
+
+### Kalau dijelasin :
+
+1. `match &request_line[..]` dipakai buat ngecek request line dan nentuin response berdasarkan path yang diminta
+2. Kalau request-nya `GET / HTTP/1.1`, server langsung balikin `hello.html` seperti biasa
+3. Kalau request-nya `GET /sleep HTTP/1.1`, server akan berhenti dulu selama 10 detik pakai `thread::sleep(Duration::from_secs(10))`
+4. Setelah delay selesai, baru server balikin response `200 OK` dengan file `hello.html`
+5. Kalau path-nya selain `/` dan `/sleep`, server tetap balikin `404.html`
+
+### Apa masalah yang kelihatan:
+
+Masalahnya muncul karena server masih single thread. Artinya server cuma bisa memproses satu request dalam satu waktu. Kalau ada satu request yang lama, misalnya `/sleep`, request berikutnya harus nunggu dulu sampai proses sebelumnya selesai.
+
+Saat dicoba buka `http://127.0.0.1:7878/sleep` di satu tab, lalu buka `http://127.0.0.1:7878` di tab lain, halaman utama juga ikut loading. Padahal halaman utama sebenarnya tidak punya delay. Ini terjadi karena server belum bisa menjalankan beberapa request secara bersamaan.
+
+### Insight dari bagian ini:
+
+1. Single thread server punya keterbatasan kalau ada request yang prosesnya lama
+2. Satu request yang lambat bisa bikin request lain ikut menunggu
+3. `thread::sleep` di sini bukan fitur utama server, tapi dipakai untuk simulasi request yang lambat
+4. Dari masalah ini mulai kelihatan kenapa web server butuh concurrency atau thread pool
+
+### Refleksi pribadi:
+
+Menurutku pada bagian ini penting karena masalahnya langsung terasa saat dicoba di browser. Awalnya server kelihatan sudah bisa handle beberapa route, tapi ternyata kalau satu request dibuat lama, semua request lain ikut kena efeknya.
