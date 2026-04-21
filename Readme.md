@@ -172,3 +172,81 @@ Saat dicoba buka `http://127.0.0.1:7878/sleep` di satu tab, lalu buka `http://12
 ### Refleksi pribadi:
 
 Menurutku pada bagian ini penting karena masalahnya langsung terasa saat dicoba di browser. Awalnya server kelihatan sudah bisa handle beberapa route, tapi ternyata kalau satu request dibuat lama, semua request lain ikut kena efeknya.
+
+# Commit 5 Reflection Notes
+
+Di commit ini servernya mulai diubah dari single-threaded jadi multithreaded server dengan thread pool. Sebelumnya, server cuma bisa handle satu request dalam satu waktu. Jadi kalau ada request ke `/sleep`, request lain seperti `/` ikut nunggu sampai sleep selesai. Sekarang request yang masuk dikirim ke `ThreadPool`, jadi beberapa request bisa diproses oleh worker yang berbeda.
+
+### Perubahan ada di bagian `main`:
+
+```rust
+use hello::ThreadPool;
+
+fn main() {
+    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+    let pool = ThreadPool::new(4);
+
+    for stream in listener.incoming() {
+        let stream = stream.unwrap();
+
+        pool.execute(|| {
+            handle_connection(stream);
+        });
+    }
+}
+```
+
+### Kalau dijelasin :
+
+1. `ThreadPool::new(4)` membuat thread pool dengan 4 worker thread
+2. Setiap koneksi yang masuk tetap dibaca lewat `listener.incoming()`
+3. Bedanya, koneksi tidak langsung diproses dengan `handle_connection(stream)`
+4. Koneksi dikirim ke `pool.execute(...)`, lalu worker yang kosong akan menjalankan `handle_connection(stream)`
+5. Dengan cara ini, request lambat seperti `/sleep` tidak langsung ngeblok semua request lain
+
+### Perubahan di `lib.rs`:
+
+```rust
+pub struct ThreadPool {
+    workers: Vec<Worker>,
+    sender: mpsc::Sender<Job>,
+}
+
+type Job = Box<dyn FnOnce() + Send + 'static>;
+```
+
+Di file `lib.rs`, dibuat struct `ThreadPool` yang nyimpen kumpulan `Worker` dan `sender`. `Job` dipakai sebagai alias untuk closure yang akan dijalankan worker. Karena closure ini dikirim antar thread, maka perlu `Send` dan `'static`.
+
+Bagian worker-nya kurang lebih seperti ini:
+
+```rust
+let job = receiver.lock().unwrap().recv().unwrap();
+
+println!("Worker {id} got a job; executing.");
+
+job();
+```
+
+Worker akan nunggu job dari channel. Kalau ada job masuk, worker mengambil job itu lalu menjalankannya. `recv()` sifatnya blocking, jadi worker akan diam dulu sampai ada pekerjaan baru.
+
+Receiver dari channel perlu dipakai bareng-bareng oleh beberapa worker. Karena ownership di Rust tidak bisa asal dibagi ke banyak thread, dipakai Arc supaya receiver bisa punya shared ownership. Lalu dipakai Mutex supaya hanya satu worker yang mengambil job dari receiver dalam satu waktu.
+
+Jadi alurnya sekarang seperti ini:
+
+1. `main` nerima koneksi dari browser
+2. Koneksi dibungkus dalam closure
+3. Closure dikirim ke channel lewat `sender`
+4. Worker mengambil job dari receiver
+5. Worker menjalankan `handle_connection`
+
+### Insight dari bagian ini:
+
+1. Thread pool membantu server memproses beberapa request secara bersamaan
+2. Jumlah thread dibatasi supaya server tidak membuat thread tanpa batas
+3. Channel bisa dipake sebagai antrian job antara `ThreadPool` dan `Worker`
+4. `Arc<Mutex<_>>` penting untuk sharing data antar thread dengan aman
+5. Multithreaded server bikin masalah di commit sebelumnya jadi lebih jelas solusinya
+
+### Refleksi pribadi:
+
+Awalnya server cuma kelihatan seperti program yang menerima request biasa, tapi setelah pakai thread pool, mulai kebayang gimana server bisa tetap responsif walaupun ada request yang prosesnya lama.
