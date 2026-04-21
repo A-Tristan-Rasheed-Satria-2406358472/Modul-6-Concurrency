@@ -250,3 +250,62 @@ Jadi alurnya sekarang seperti ini:
 ### Refleksi pribadi:
 
 Awalnya server cuma kelihatan seperti program yang menerima request biasa, tapi setelah pakai thread pool, mulai kebayang gimana server bisa tetap responsif walaupun ada request yang prosesnya lama.
+
+# Bonus Reflection Notes
+
+Di bagian bonus ini aku coba bikin function `build` sebagai alternatif dari `new` untuk membuat `ThreadPool`. Bedanya, `new` langsung membuat `ThreadPool` dan akan panic kalau size-nya tidak valid, sedangkan `build` mengembalikan `Result`. Jadi kalau size yang dikasih salah, program bisa mengembalikan error tanpa langsung panic.
+
+### Perubahan ada di bagian ini:
+
+```rust
+impl ThreadPool {
+    pub fn new(size: usize) -> ThreadPool {
+        ThreadPool::build(size).unwrap()
+    }
+
+    pub fn build(size: usize) -> Result<ThreadPool, PoolCreationError> {
+        if size == 0 {
+            return Err(PoolCreationError);
+        }
+
+        let (sender, receiver) = mpsc::channel();
+        let receiver = Arc::new(Mutex::new(receiver));
+
+        let mut workers = Vec::with_capacity(size);
+
+        for id in 0..size {
+            workers.push(Worker::new(id, Arc::clone(&receiver)));
+        }
+
+        Ok(ThreadPool { workers, sender })
+    }
+}
+```
+
+Lalu di `main`, pembuatan thread pool bisa memakai `build` seperti ini:
+
+```rust
+let pool = ThreadPool::build(4).unwrap();
+```
+
+### Kalau dijelasin :
+
+1. `build` mengembalikan `Result<ThreadPool, PoolCreationError>`
+2. Kalau `size == 0`, function langsung mengembalikan `Err(PoolCreationError)`
+3. Kalau size valid, proses pembuatan worker tetap sama seperti sebelumnya
+4. `new` masih bisa dipakai, tapi sekarang isinya memanggil `ThreadPool::build(size).unwrap()`
+
+### Perbandingan `new` dan `build`:
+
+`new` lebih simpel dipakai karena langsung mengembalikan `ThreadPool`. Tapi kekurangannya, kalau input tidak valid seperti `ThreadPool::new(0)`, program akan panic karena `unwrap()` gagal. `build` lebih aman dan fleksibel karena error-nya dikembalikan sebagai `Result`. Jadi caller bisa memilih mau pakai `unwrap()`, `expect()`, atau handle error-nya sendiri. Menurutku `build` lebih cocok kalau programnya ingin dibuat lebih robust, karena error bisa ditangani tanpa langsung menghentikan program.
+
+### Insight dari bagian ini:
+
+1. `Result` cocok dipakai kalau ada kemungkinan proses gagal
+2. `new` cocok untuk constructor yang sederhana dan biasanya diasumsikan selalu berhasil
+3. `build` lebih eksplisit karena dari return type-nya sudah kelihatan kalau pembuatan thread pool bisa gagal
+4. Error handling di Rust bisa dibuat lebih jelas tanpa harus selalu pakai panic
+
+### Refleksi pribadi:
+
+Kalau pakai `new`, kegagalan dianggap sebagai masalah fatal. Tapi kalau pakai `build`, program dikasih kesempatan untuk menangani error dengan lebih rapi.
